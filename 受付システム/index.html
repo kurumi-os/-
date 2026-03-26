@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>受付システム</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* =============================================
+       カラーパレット（くすみオレンジ）
+       bg-dark  : #1e1208  温かみのある暗い茶色
+       bg-card  : #2e1d10  カード背景
+       bg-deep  : #140c05  より深い背景
+       orange   : #c97b4b  メインのくすみオレンジ
+       orange-l : #e0a070  明るめオレンジ
+       orange-d : #9e5c30  濃いオレンジ
+       cream    : #f5e6d3  クリーム
+       muted    : #b89880  くすみテキスト
+       faint    : #7a5c44  薄いテキスト
+       sage     : #8dab7f  くすみグリーン（成功）
+       amber    : #d4a046  くすみアンバー（警告）
+       dustrose : #c47070  ダストローズ（エラー）
+    ============================================= */
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+      background: #faf6f2;
+      color: #2c1810;
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, #9e5c30 0%, #c97b4b 60%, #d4956a 100%);
+      padding: 18px 20px;
+      text-align: center;
+      box-shadow: 0 3px 16px rgba(0,0,0,0.45);
+      position: relative;
+    }
+    header::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #e0a07088, transparent);
+    }
+    header h1 { font-size: 18px; font-weight: bold; letter-spacing: 0.08em; color: #fff5ec; }
+    header p  { font-size: 12px; color: #f5d8c0; opacity: 0.85; margin-top: 4px; }
+
+    .status-bar {
+      background: #fff8f3;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: #8a6a55;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #e8d5c4;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #c4a882; flex-shrink: 0;
+    }
+    .dot.ready   { background: #6a9e5e; animation: blink 2s infinite; }
+    .dot.loading { background: #c97b4b; animation: blink 0.8s infinite; }
+    .dot.error   { background: #c47070; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    .main {
+      padding: 14px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* ---- Stats ---- */
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-card {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 16px 14px;
+      text-align: center;
+      border: 1px solid #e8d5c4;
+      box-shadow: 0 2px 10px rgba(180,100,50,0.08);
+    }
+    .stat-number { font-size: 32px; font-weight: 700; color: #c97b4b; }
+    .stat-number.green { color: #6a9e5e; }
+    .stat-label { font-size: 11px; color: #8a6a55; margin-top: 4px; }
+
+    /* ---- Scanner ---- */
+    .scanner-wrap {
+      background: #ffffff;
+      border-radius: 18px;
+      overflow: hidden;
+      margin-bottom: 14px;
+      border: 1.5px solid #e8d5c4;
+      box-shadow: 0 4px 16px rgba(180,100,50,0.1);
+    }
+    .scanner-label {
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #c97b4b;
+      background: #fff8f3;
+      text-align: center;
+      letter-spacing: 0.04em;
+    }
+    #qr-reader { width: 100%; }
+    #qr-reader video { border-radius: 0 !important; }
+    #qr-reader__scan_region img,
+    #qr-reader__dashboard { display: none !important; }
+
+    /* ---- Manual search ---- */
+    .search-wrap {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 14px;
+      border: 1px solid #e8d5c4;
+      box-shadow: 0 2px 10px rgba(180,100,50,0.07);
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #8a6a55;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+    .search-input {
+      width: 100%;
+      background: #faf6f2;
+      border: 1.5px solid #e8d5c4;
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: #2c1810;
+      font-size: 14px;
+    }
+    .search-input::placeholder { color: #c4a882; }
+    .search-input:focus { outline: none; border-color: #c97b4b; }
+    .search-result-item {
+      padding: 10px 12px;
+      background: #faf6f2;
+      border-radius: 10px;
+      margin-top: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+      border: 1px solid #e8d5c4;
+    }
+    .search-result-item:hover { background: #fceee3; }
+    .search-result-item .name { font-size: 14px; font-weight: 500; color: #2c1810; }
+    .search-result-item .sub  { font-size: 11px; color: #8a6a55; margin-top: 2px; }
+
+    /* ---- Checked-in list ---- */
+    .checked-wrap {
+      background: #ffffff;
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 14px;
+      border: 1px solid #e8d5c4;
+      box-shadow: 0 2px 10px rgba(180,100,50,0.07);
+    }
+    .checked-header {
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      background: #fff8f3;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #c97b4b;
+      border-bottom: 1px solid #e8d5c4;
+    }
+    .checked-header .count { color: #c97b4b; font-size: 12px; }
+    .checked-body { max-height: 220px; overflow-y: auto; }
+    .checked-item {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f5ede4;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+    .checked-item:last-child { border-bottom: none; }
+    .checked-item .cname  { font-weight: 500; color: #2c1810; }
+    .checked-item .csub   { font-size: 11px; color: #8a6a55; }
+    .checked-item .ctime  { font-size: 11px; color: #c4a882; flex-shrink: 0; margin-left: 8px; }
+
+    /* export / reset buttons */
+    .export-btn {
+      background: #fff0e6;
+      color: #c97b4b;
+      border: 1px solid #e8d5c4;
+      padding: 5px 11px;
+      border-radius: 8px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .export-btn:hover { background: #fce0cc; }
+
+    /* ---- Result Overlay ---- */
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(44, 24, 16, 0.75);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .overlay.show { display: flex; }
+
+    .result-card {
+      background: #ffffff;
+      border-radius: 24px;
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+      border: 1px solid #e8d5c4;
+    }
+    .result-icon  { font-size: 64px; line-height: 1; margin-bottom: 14px; }
+    .result-title { font-size: 22px; font-weight: 700; margin-bottom: 14px; }
+
+    .result-card.success  .result-title { color: #8dab7f; }
+    .result-card.already  .result-title { color: #d4a046; }
+    .result-card.notfound .result-title { color: #c47070; }
+
+    /* member info block */
+    .minfo {
+      background: #faf6f2;
+      border-radius: 14px;
+      padding: 14px;
+      text-align: left;
+      margin-bottom: 16px;
+      border: 1px solid #e8d5c4;
+    }
+    .mrow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid #e8d5c4;
+      font-size: 13px;
+    }
+    .mrow:last-child { border-bottom: none; }
+    .mrow .lbl { color: #8a6a55; }
+    .mrow .val { font-weight: 500; color: #2c1810; }
+
+    /* badges */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tora    { background: #f5d9a0; color: #6b3c0a; }
+    .panda   { background: #c8e6c0; color: #2d5a25; }
+    .iruka   { background: #b8d4e8; color: #1a3d5c; }
+    .penguin { background: #ddd0f0; color: #3d2060; }
+
+    .close-btn {
+      background: linear-gradient(135deg, #9e5c30, #c97b4b);
+      color: #fff5ec;
+      border: none;
+      padding: 13px;
+      border-radius: 14px;
+      width: 100%;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      letter-spacing: 0.04em;
+    }
+    .close-btn:hover { opacity: 0.88; }
+
+    /* note */
+    .note {
+      font-size: 12px;
+      color: #8a6a55;
+      text-align: center;
+      padding: 10px 12px;
+      margin-bottom: 14px;
+      background: #fff8f3;
+      border-radius: 10px;
+      border: 1px solid #e8d5c4;
+      line-height: 1.7;
+    }
+    .note a { color: #c97b4b; }
+
+    /* reload btn */
+    .reload-btn {
+      background: linear-gradient(135deg, #9e5c30, #c97b4b);
+      color: #fff5ec;
+      border: none;
+      padding: 11px;
+      border-radius: 12px;
+      width: 100%;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 14px;
+      letter-spacing: 0.04em;
+      transition: opacity 0.15s;
+    }
+    .reload-btn:hover { opacity: 0.88; }
+
+    /* ---- Settings panel ---- */
+    .settings-wrap {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 14px;
+      border: 1px solid #e8d5c4;
+      box-shadow: 0 2px 10px rgba(180,100,50,0.07);
+    }
+    .settings-wrap .section-title { margin-bottom: 12px; }
+    .setting-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .setting-row:last-child { margin-bottom: 0; }
+    .setting-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #8a6a55;
+    }
+    .setting-input {
+      width: 100%;
+      background: #faf6f2;
+      border: 1.5px solid #e8d5c4;
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: #2c1810;
+      font-size: 14px;
+    }
+    .setting-input:focus { outline: none; border-color: #c97b4b; }
+    .csv-upload-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #fff0e6;
+      color: #c97b4b;
+      border: 1.5px dashed #e8b48a;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .csv-upload-label:hover { background: #fce0cc; }
+    .csv-upload-label input { display: none; }
+    .csv-status {
+      font-size: 12px;
+      color: #8a6a55;
+      text-align: center;
+      margin-top: 6px;
+    }
+    .settings-toggle {
+      background: none;
+      border: none;
+      color: #c97b4b;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>受付システム</h1>
+  <p id="headerSub">北陸1dayオフィス</p>
+</header>
+
+<div class="status-bar">
+  <div class="dot loading" id="statusDot"></div>
+  <span id="statusText">データ読み込み中...</span>
+</div>
+
+<div class="main">
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-number" id="totalCount">–</div>
+      <div class="stat-label">登録者数</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number green" id="checkedCount">0</div>
+      <div class="stat-label">受付済み</div>
+    </div>
+  </div>
+
+  <!-- 設定パネル -->
+  <div class="settings-wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:0">設定</div>
+      <button class="settings-toggle" onclick="toggleSettings()">
+        <span id="settingsArrow">▼</span> 開く
+      </button>
+    </div>
+    <div id="settingsBody" style="display:none">
+
+      <!-- イベント名 -->
+      <div class="setting-row">
+        <div class="setting-label">イベント名</div>
+        <input
+          type="text"
+          class="setting-input"
+          id="eventNameInput"
+          placeholder="例：北陸1dayオフィス"
+          oninput="updateEventName()"
+        >
+      </div>
+
+      <!-- Supabase 接続 -->
+      <div class="setting-row">
+        <div class="setting-label">Supabase URL（複数端末で同期する場合）</div>
+        <input type="text" class="setting-input" id="supabaseUrl" placeholder="https://xxxxxxxxxx.supabase.co" autocomplete="off">
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">Supabase Anon Key</div>
+        <input type="password" class="setting-input" id="supabaseKey" placeholder="eyJhbGciOiJIUzI1NiIs..." autocomplete="off">
+      </div>
+      <div class="setting-row">
+        <button class="reload-btn" style="margin-bottom:0" onclick="connectSupabase()">Supabaseに接続する</button>
+        <div id="supabaseStatus" class="csv-status"></div>
+      </div>
+      <div style="border-top:1px solid #e8d5c4;margin:12px 0"></div>
+
+      <!-- CSV読み込み -->
+      <div class="setting-row">
+        <div class="setting-label">参加者CSVを読み込む（既存データは上書きされます）</div>
+        <label class="csv-upload-label">
+          <span>📂</span> CSVファイルを選択
+          <input type="file" accept=".csv" onchange="loadCSVFile(this)">
+        </label>
+        <div class="csv-status" id="csvStatus"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- QR Scanner -->
+  <div class="scanner-wrap">
+    <div class="scanner-label">QRコードをカメラにかざしてください</div>
+    <div id="qr-reader"></div>
+  </div>
+
+  <!-- Manual Search -->
+  <div class="search-wrap">
+    <div class="section-title">名前で手動検索</div>
+    <input
+      type="text"
+      class="search-input"
+      id="searchInput"
+      placeholder="名前を入力..."
+      autocomplete="off"
+      oninput="searchMembers()"
+    >
+    <div id="searchResults"></div>
+  </div>
+
+  <!-- Checked-in List -->
+  <div class="checked-wrap">
+    <div class="checked-header">
+      <span>受付済みリスト</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="export-btn" onclick="exportCSV()">CSV出力</button>
+        <button class="export-btn" style="background:#3b1a1a;color:#f87171" onclick="resetCheckedIn()">リセット</button>
+        <span class="count" id="checkedHeaderCount">0件</span>
+      </div>
+    </div>
+    <div class="checked-body" id="checkedBody">
+      <div style="padding:16px;text-align:center;color:#475569;font-size:13px">まだ受付はありません</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Result Overlay -->
+<div class="overlay" id="overlay" onclick="handleOverlayClick(event)">
+  <div class="result-card" id="resultCard">
+    <div class="result-icon" id="resultIcon"></div>
+    <div class="result-title" id="resultTitle"></div>
+    <div id="resultBody"></div>
+    <button class="close-btn" onclick="closeOverlay()">閉じてスキャン再開</button>
+  </div>
+</div>
+
+<script>
+// =========================================================
+//  CONFIG
+// =========================================================
+const EVENT_NAME_KEY = 'uketsuke_eventName';
+
+// =========================================================
+//  STATE
+// =========================================================
+let members     = [];   // { no, memberType, name, category, gender, region, profileUrl }
+let checkedIn   = [];   // { member, time }
+let checkedUrls = new Set();
+let scanner     = null;
+let autoCloseTimer = null;
+let scanning    = true;
+
+// =========================================================
+//  LOCAL STORAGE（オフライン保持）
+// =========================================================
+const STORAGE_KEY    = 'uketsuke_checkedIn';
+const SUPABASE_URL_KEY = 'uketsuke_sbUrl';
+const SUPABASE_KEY_KEY = 'uketsuke_sbKey';
+
+function saveLocal() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(checkedIn)); } catch(e) {}
+}
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved)) return;
+    checkedIn   = saved;
+    checkedUrls = new Set(saved.map(r => r.member.profileUrl));
+    renderCheckedList();
+    document.getElementById('checkedCount').textContent = checkedIn.length;
+  } catch(e) {}
+}
+
+// =========================================================
+//  SUPABASE
+// =========================================================
+let sb = null;  // Supabase client
+
+function loadSupabaseCreds() {
+  const url = localStorage.getItem(SUPABASE_URL_KEY) || '';
+  const key = localStorage.getItem(SUPABASE_KEY_KEY) || '';
+  if (url) document.getElementById('supabaseUrl').value = url;
+  if (key) document.getElementById('supabaseKey').value = key;
+  return { url, key };
+}
+
+async function connectSupabase() {
+  const url = document.getElementById('supabaseUrl').value.trim();
+  const key = document.getElementById('supabaseKey').value.trim();
+  const statusEl = document.getElementById('supabaseStatus');
+
+  if (!url || !key) {
+    statusEl.textContent = '⚠ URLとKeyを両方入力してください';
+    return;
+  }
+
+  statusEl.textContent = '接続中...';
+
+  try {
+    sb = supabase.createClient(url, key);
+
+    // 接続テスト
+    const { error } = await sb.from('checkins').select('id').limit(1);
+    if (error) throw error;
+
+    // 認証情報を保存
+    localStorage.setItem(SUPABASE_URL_KEY, url);
+    localStorage.setItem(SUPABASE_KEY_KEY, key);
+
+    statusEl.textContent = '✓ 接続成功！リアルタイム同期が有効です';
+    setStatus('ready', 'Supabase接続済み — リアルタイム同期中');
+
+    // Supabaseからデータ読み込み
+    await loadFromSupabase();
+
+    // リアルタイム購読開始
+    subscribeRealtime();
+
+  } catch(e) {
+    console.error(e);
+    statusEl.textContent = `✗ 接続失敗: ${e.message || 'URLまたはKeyを確認してください'}`;
+    sb = null;
+  }
+}
+
+async function loadFromSupabase() {
+  if (!sb) return;
+  const eventName = document.getElementById('eventNameInput').value.trim() || 'default';
+  const { data, error } = await sb
+    .from('checkins')
+    .select('*')
+    .eq('event_name', eventName)
+    .order('created_at', { ascending: false });
+
+  if (error) { console.error(error); return; }
+
+  checkedIn   = data.map(row => ({
+    member: {
+      profileUrl: row.profile_url,
+      name:       row.name,
+      category:   row.category,
+      memberType: row.member_type,
+      gender:     row.gender,
+      region:     row.region,
+      no:         row.no || '',
+    },
+    time: row.checked_at,
+  }));
+  checkedUrls = new Set(data.map(r => r.profile_url));
+  renderCheckedList();
+  document.getElementById('checkedCount').textContent = checkedIn.length;
+}
+
+function subscribeRealtime() {
+  if (!sb) return;
+  const eventName = document.getElementById('eventNameInput').value.trim() || 'default';
+
+  sb.channel('checkins-changes')
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'checkins', filter: `event_name=eq.${eventName}` },
+      payload => {
+        const row = payload.new;
+        if (checkedUrls.has(row.profile_url)) return;  // 自分が追加したものは無視
+        checkedUrls.add(row.profile_url);
+        checkedIn.unshift({
+          member: {
+            profileUrl: row.profile_url,
+            name:       row.name,
+            category:   row.category,
+            memberType: row.member_type,
+            gender:     row.gender,
+            region:     row.region,
+            no:         row.no || '',
+          },
+          time: row.checked_at,
+        });
+        renderCheckedList();
+        document.getElementById('checkedCount').textContent = checkedIn.length;
+      }
+    )
+    .on('postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'checkins', filter: `event_name=eq.${eventName}` },
+      () => { loadFromSupabase(); }
+    )
+    .subscribe();
+}
+
+async function saveCheckIn(member, time) {
+  // ローカルに保存
+  checkedIn.unshift({ member, time });
+  checkedUrls.add(member.profileUrl);
+  saveLocal();
+  renderCheckedList();
+  document.getElementById('checkedCount').textContent = checkedIn.length;
+
+  // Supabase にも保存
+  if (sb) {
+    const eventName = document.getElementById('eventNameInput').value.trim() || 'default';
+    const { error } = await sb.from('checkins').upsert({
+      event_name:  eventName,
+      profile_url: member.profileUrl,
+      name:        member.name,
+      category:    member.category,
+      member_type: member.memberType,
+      gender:      member.gender,
+      region:      member.region,
+      no:          member.no,
+      checked_at:  time,
+    }, { onConflict: 'event_name,profile_url', ignoreDuplicates: true });
+    if (error) console.error('Supabase insert error:', error);
+  }
+}
+
+async function resetCheckedIn() {
+  if (!confirm('受付済みリストを全てリセットしますか？\n（次のイベント前に使ってください）')) return;
+
+  if (sb) {
+    const eventName = document.getElementById('eventNameInput').value.trim() || 'default';
+    await sb.from('checkins').delete().eq('event_name', eventName);
+  }
+
+  checkedIn   = [];
+  checkedUrls = new Set();
+  localStorage.removeItem(STORAGE_KEY);
+  renderCheckedList();
+  document.getElementById('checkedCount').textContent = 0;
+}
+
+// =========================================================
+//  DATA LOADING
+// =========================================================
+function loadCSVFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    members = [];  // 既存データをリセット
+    parseCSV(e.target.result);
+    setStatus('ready', `CSV読み込み完了 — ${members.length}件`);
+    document.getElementById('totalCount').textContent = members.length;
+    document.getElementById('sheetNote').style.display = 'none';
+    document.getElementById('csvStatus').textContent = `✓ ${file.name}（${members.length}件）`;
+    input.value = '';  // 同じファイルを再選択できるようリセット
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// =========================================================
+//  SETTINGS
+// =========================================================
+function toggleSettings() {
+  const body  = document.getElementById('settingsBody');
+  const arrow = document.getElementById('settingsArrow');
+  const open  = body.style.display === 'none';
+  body.style.display  = open ? 'block' : 'none';
+  arrow.textContent   = open ? '▲' : '▼';
+}
+
+function updateEventName() {
+  const val = document.getElementById('eventNameInput').value;
+  document.getElementById('headerSub').textContent = val || '受付システム';
+  try { localStorage.setItem(EVENT_NAME_KEY, val); } catch(e) {}
+}
+
+function loadEventName() {
+  try {
+    const saved = localStorage.getItem(EVENT_NAME_KEY);
+    if (saved) {
+      document.getElementById('eventNameInput').value = saved;
+      document.getElementById('headerSub').textContent = saved;
+    }
+  } catch(e) {}
+}
+
+function parseCSV(csv) {
+  // Normalize line endings
+  const lines = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  members = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = splitCSVRow(lines[i]);
+    if (row.length < 8) continue;
+    const profileUrl = clean(row[7]);
+    if (!profileUrl || !profileUrl.startsWith('http')) continue;
+
+    members.push({
+      no:         clean(row[0]),
+      memberType: clean(row[1]),
+      name:       clean(row[2]),
+      category:   clean(row[3]),
+      gender:     clean(row[4]),
+      region:     clean(row[5]),
+      profileUrl: profileUrl,
+    });
+  }
+}
+
+function splitCSVRow(row) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < row.length; i++) {
+    const c = row[i];
+    if (c === '"') { inQ = !inQ; continue; }
+    if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else cur += c;
+  }
+  result.push(cur);
+  return result;
+}
+
+function clean(s) {
+  return (s || '').trim().replace(/^"|"$/g, '');
+}
+
+// =========================================================
+//  QR SCANNER
+// =========================================================
+function startScanner() {
+  if (scanner) return;
+  const qr = new Html5Qrcode('qr-reader');
+  scanner = qr;
+
+  qr.start(
+    { facingMode: 'environment' },
+    { fps: 12, qrbox: { width: 240, height: 240 } },
+    onScanSuccess,
+    () => {}   // ignore frame errors
+  ).catch(err => {
+    console.error('Camera:', err);
+    setStatus('error', 'カメラにアクセスできません (ブラウザの許可を確認)');
+  });
+}
+
+function onScanSuccess(text) {
+  if (!scanning) return;          // block while result is shown
+  scanning = false;
+
+  const url = text.trim().replace(/\/$/, '');
+  const member = findMember(url);
+
+  if (!member) {
+    showOverlay('notfound', null, url);
+    return;
+  }
+
+  if (checkedUrls.has(member.profileUrl)) {
+    showOverlay('already', member);
+  } else {
+    const time = nowHHMM();
+    saveCheckIn(member, time);
+    showOverlay('success', member);
+  }
+}
+
+function findMember(scannedUrl) {
+  // Normalize: strip trailing slash, lowercase
+  const norm = s => s.trim().replace(/\/$/, '').toLowerCase();
+  const target = norm(scannedUrl);
+
+  return members.find(m => {
+    const mu = norm(m.profileUrl);
+    if (mu === target) return true;
+    // partial match on the last path segment (profile ID)
+    const mSeg = mu.split('/').pop();
+    const tSeg = target.split('/').pop();
+    return mSeg && mSeg === tSeg;
+  }) || null;
+}
+
+// =========================================================
+//  OVERLAY
+// =========================================================
+function showOverlay(type, member, raw = '') {
+  clearTimeout(autoCloseTimer);
+
+  const card  = document.getElementById('resultCard');
+  const icon  = document.getElementById('resultIcon');
+  const title = document.getElementById('resultTitle');
+  const body  = document.getElementById('resultBody');
+
+  card.className = `result-card ${type}`;
+
+  if (type === 'success') {
+    icon.textContent  = '✅';
+    title.textContent = '受付完了！';
+    body.innerHTML    = buildMemberHTML(member);
+    autoCloseTimer    = setTimeout(closeOverlay, 6000);
+  } else if (type === 'already') {
+    icon.textContent  = '⚠️';
+    title.textContent = '受付済みです';
+    body.innerHTML    = buildMemberHTML(member)
+      + `<p style="color:#f59e0b;font-size:13px;margin-bottom:12px">この方はすでに受付済みです</p>`;
+  } else {
+    icon.textContent  = '❌';
+    title.textContent = '未登録';
+    body.innerHTML    = `
+      <div class="minfo" style="margin-bottom:14px">
+        <p style="font-size:12px;color:#64748b;margin-bottom:4px">スキャンされたURL：</p>
+        <p style="font-size:11px;word-break:break-all;color:#94a3b8">${esc(raw)}</p>
+      </div>`;
+  }
+
+  document.getElementById('overlay').classList.add('show');
+}
+
+function buildMemberHTML(m) {
+  return `
+    <div class="minfo">
+      <div class="mrow"><span class="lbl">名前</span><span class="val">${esc(m.name)}</span></div>
+      <div class="mrow">
+        <span class="lbl">会員区分</span>
+        <span class="val"><span class="badge ${badgeClass(m.category)}">${esc(m.category)}</span></span>
+      </div>
+      <div class="mrow"><span class="lbl">種別</span><span class="val">${esc(m.memberType)}</span></div>
+      <div class="mrow"><span class="lbl">地域</span><span class="val">${esc(m.region)}</span></div>
+      <div class="mrow"><span class="lbl">性別</span><span class="val">${esc(m.gender)}</span></div>
+    </div>`;
+}
+
+function badgeClass(cat) {
+  if (!cat) return '';
+  if (cat.includes('トラ'))   return 'badge tora';
+  if (cat.includes('パンダ')) return 'badge panda';
+  if (cat.includes('イルカ')) return 'badge iruka';
+  if (cat.includes('ペンギン')) return 'badge penguin';
+  return 'badge';
+}
+
+function closeOverlay() {
+  clearTimeout(autoCloseTimer);
+  document.getElementById('overlay').classList.remove('show');
+  scanning = true;
+}
+
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById('overlay')) closeOverlay();
+}
+
+// =========================================================
+//  MANUAL SEARCH
+// =========================================================
+function searchMembers() {
+  const q   = document.getElementById('searchInput').value.trim();
+  const box = document.getElementById('searchResults');
+
+  if (!q) { box.innerHTML = ''; return; }
+
+  const found = members.filter(m =>
+    m.name.toLowerCase().includes(q.toLowerCase())
+  ).slice(0, 8);
+
+  if (!found.length) {
+    box.innerHTML = '<div style="font-size:13px;color:#475569;padding:8px">見つかりません</div>';
+    return;
+  }
+
+  box.innerHTML = found.map(m => `
+    <div class="search-result-item" onclick="manualCheckIn(${JSON.stringify(m.profileUrl)})">
+      <div class="name">${esc(m.name)}</div>
+      <div class="sub">${esc(m.category)} · ${esc(m.region)}</div>
+    </div>
+  `).join('');
+}
+
+function manualCheckIn(profileUrl) {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+
+  const member = members.find(m => m.profileUrl === profileUrl);
+  if (!member) return;
+
+  if (checkedUrls.has(member.profileUrl)) {
+    showOverlay('already', member);
+  } else {
+    const time = nowHHMM();
+    saveCheckIn(member, time);
+    showOverlay('success', member);
+  }
+}
+
+// =========================================================
+//  CHECKED LIST
+// =========================================================
+function renderCheckedList() {
+  const body  = document.getElementById('checkedBody');
+  const count = document.getElementById('checkedHeaderCount');
+
+  count.textContent = `${checkedIn.length}件`;
+
+  if (!checkedIn.length) {
+    body.innerHTML = '<div style="padding:16px;text-align:center;color:#475569;font-size:13px">まだ受付はありません</div>';
+    return;
+  }
+
+  body.innerHTML = checkedIn.map(({ member: m, time }) => `
+    <div class="checked-item">
+      <div>
+        <div class="cname">${esc(m.name)}</div>
+        <div class="csub">${esc(m.category)} · ${esc(m.region)}</div>
+      </div>
+      <div class="ctime">${time}</div>
+    </div>
+  `).join('');
+}
+
+// =========================================================
+//  CSV EXPORT
+// =========================================================
+function exportCSV() {
+  if (!checkedIn.length) { alert('受付済みのデータがありません'); return; }
+
+  const header = 'No,名前,会員区分,種別,性別,地域,受付時間\n';
+  const rows = checkedIn.map(({ member: m, time }) =>
+    [m.no, m.name, m.category, m.memberType, m.gender, m.region, time]
+      .map(v => `"${(v||'').replace(/"/g,'""')}"`)
+      .join(',')
+  ).join('\n');
+
+  const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `受付済みリスト_${dateStr()}.csv`;
+  a.click();
+}
+
+// =========================================================
+//  UTILS
+// =========================================================
+function setStatus(type, text) {
+  document.getElementById('statusDot').className  = `dot ${type}`;
+  document.getElementById('statusText').textContent = text;
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function nowHHMM() {
+  const d = new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function dateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+// =========================================================
+//  INIT
+// =========================================================
+window.addEventListener('load', async () => {
+  loadEventName();          // イベント名を復元
+  loadLocal();              // ローカルの受付済みデータを復元
+  const { url, key } = loadSupabaseCreds();
+  if (url && key) {
+    await connectSupabase(); // 前回の接続情報があれば自動接続
+  } else {
+    setStatus('ready', 'CSVを読み込んで開始してください');
+  }
+  startScanner();
+});
+</script>
+</body>
+</html>
