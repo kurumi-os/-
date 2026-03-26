@@ -590,7 +590,10 @@ async function connectSupabase() {
     statusEl.textContent = '✓ 接続成功！リアルタイム同期が有効です';
     setStatus('ready', 'Supabase接続済み — リアルタイム同期中');
 
-    // Supabaseからデータ読み込み
+    // Supabaseから参加者データ読み込み
+    await loadMembersFromSupabase();
+
+    // Supabaseから受付済みデータ読み込み
     await loadFromSupabase();
 
     // リアルタイム購読開始
@@ -601,6 +604,61 @@ async function connectSupabase() {
     statusEl.textContent = `✗ 接続失敗: ${e.message || 'URLまたはKeyを確認してください'}`;
     sb = null;
   }
+}
+
+// Supabaseから参加者リストを読み込む
+async function loadMembersFromSupabase() {
+  if (!sb) return;
+  const { data, error } = await sb
+    .from('members')
+    .select('*')
+    .order('no', { ascending: true });
+
+  if (error) { console.error('members load error:', error); return; }
+  if (!data || data.length === 0) return;
+
+  members = data.map(row => ({
+    no:         row.no        || '',
+    memberType: row.member_type || '',
+    name:       row.name      || '',
+    category:   row.category  || '',
+    gender:     row.gender    || '',
+    region:     row.region    || '',
+    profileUrl: row.profile_url || '',
+  }));
+
+  document.getElementById('totalCount').textContent = members.length;
+  document.getElementById('csvStatus').textContent = `✓ Supabaseから${members.length}件読み込み済み`;
+  setStatus('ready', `Supabase接続済み — 参加者${members.length}件・リアルタイム同期中`);
+}
+
+// 参加者リストをSupabaseに保存する
+async function saveMembersToSupabase() {
+  if (!sb || members.length === 0) return;
+  setStatus('loading', `Supabaseに${members.length}件を保存中...`);
+
+  // 既存データを全削除してから一括登録
+  await sb.from('members').delete().neq('profile_url', '');
+
+  const rows = members.map(m => ({
+    no:          m.no,
+    member_type: m.memberType,
+    name:        m.name,
+    category:    m.category,
+    gender:      m.gender,
+    region:      m.region,
+    profile_url: m.profileUrl,
+  }));
+
+  // 100件ずつ分割してinsert（Supabaseの上限対策）
+  for (let i = 0; i < rows.length; i += 100) {
+    const chunk = rows.slice(i, i + 100);
+    const { error } = await sb.from('members').insert(chunk);
+    if (error) { console.error('members save error:', error); }
+  }
+
+  setStatus('ready', `Supabase接続済み — 参加者${members.length}件・リアルタイム同期中`);
+  document.getElementById('csvStatus').textContent = `✓ ${members.length}件をSupabaseに保存・全端末に共有済み`;
 }
 
 async function loadFromSupabase() {
@@ -713,14 +771,20 @@ function loadCSVFile(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     members = [];  // 既存データをリセット
     parseCSV(e.target.result);
-    setStatus('ready', `CSV読み込み完了 — ${members.length}件`);
     document.getElementById('totalCount').textContent = members.length;
     document.getElementById('sheetNote').style.display = 'none';
     document.getElementById('csvStatus').textContent = `✓ ${file.name}（${members.length}件）`;
     input.value = '';  // 同じファイルを再選択できるようリセット
+
+    // Supabase接続済みなら全端末に共有
+    if (sb) {
+      await saveMembersToSupabase();
+    } else {
+      setStatus('ready', `CSV読み込み完了 — ${members.length}件（このデバイスのみ）`);
+    }
   };
   reader.readAsText(file, 'UTF-8');
 }
